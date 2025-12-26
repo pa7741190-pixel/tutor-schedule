@@ -3,12 +3,11 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # --- SETTINGS ---
-# Replace this with your actual Telegram username so students can message you!
-TELEGRAM_USERNAME = "apl450" 
+# 1. Your Telegram username (without the @)
+TELEGRAM_USERNAME = "YourUsernameHere" 
 PAGE_TITLE = "🇬🇧 English Lesson Slots"
 
-# Your specific time grid (60m lesson + 15m break)
-# Starts 10:15, Ends with the 20:15 slot
+# 2. Your Time Grid (10:15 start, 20:15 last slot)
 TIME_SLOTS = [
     "10:15", "11:30", "12:45", 
     "14:00", "15:15", "16:30", 
@@ -17,67 +16,78 @@ TIME_SLOTS = [
 
 st.set_page_config(page_title=PAGE_TITLE, page_icon="📅")
 
-# --- LOAD DATA FROM GOOGLE SHEET ---
-@st.cache_data(ttl=60) # Updates every 60 seconds
+# --- LOAD DATA ---
+@st.cache_data(ttl=60)
 def load_data(url):
     try:
-        # Convert standard Google Sheet URL to a CSV export URL
+        # Convert Google Sheet URL to CSV export URL
         csv_url = url.replace("/edit?usp=sharing", "/export?format=csv")
         csv_url = csv_url.replace("/edit#gid=", "/export?format=csv&gid=")
-        return pd.read_csv(csv_url)
+        
+        # Load the CSV
+        df = pd.read_csv(csv_url)
+        
+        # PRIVACY: Keep only Date/Time columns. Drop the Names column immediately.
+        # We rename columns to be standard just in case
+        df.columns = [c.strip() for c in df.columns]
+        if 'Day_or_Date' in df.columns:
+            df = df.rename(columns={'Day_or_Date': 'Date'})
+            
+        # Ensure data is string format for matching
+        df['Date'] = df['Date'].astype(str).str.strip()
+        df['Time'] = df['Time'].astype(str).str.strip()
+        
+        return df[['Date', 'Time']] # Return only what we need
     except Exception:
         return pd.DataFrame(columns=["Date", "Time"])
 
-# Get the secret URL from Streamlit settings
-sheet_url = st.secrets["public_sheet_url"]
-df_blocked = load_data(sheet_url)
+# Load Secrets
+if "public_sheet_url" in st.secrets:
+    sheet_url = st.secrets["public_sheet_url"]
+    df_blocked = load_data(sheet_url)
+else:
+    st.error("Please add your Google Sheet URL to Streamlit Secrets!")
+    st.stop()
 
-# --- APP INTERFACE ---
+# --- DISPLAY ---
 st.title(PAGE_TITLE)
 st.write("Here are my available slots for the next 2 weeks.")
-st.write("Click a time to book it via Telegram.")
-st.divider()
+st.info("Tap a green button to book via Telegram.")
 
-# Get today's date
 today = datetime.now().date()
 
-# Loop through the next 14 days
+# Show next 14 days
 for i in range(14):
     current_date = today + timedelta(days=i)
-    date_str = current_date.strftime("%Y-%m-%d") # Format for code: 2024-01-01
-    display_date = current_date.strftime("%A, %d %B") # Format for humans: Monday, 01 January
+    date_str = current_date.strftime("%Y-%m-%d")      # e.g., "2025-01-01"
+    day_name = current_date.strftime("%A")            # e.g., "Monday"
+    display_date = current_date.strftime("%A, %d %B") 
     
-    # Check your Google Sheet for blocks on this day
-    day_blocks = df_blocked[df_blocked['Date'] == date_str]
-    is_whole_day_blocked = "ALL" in day_blocks['Time'].values
+    # FILTER: Find blocks that match this DATE or this DAY OF WEEK
+    # This enables your "Recurring" schedule to work alongside "Specific" blocks.
+    day_blocks = df_blocked[
+        (df_blocked['Date'] == date_str) | 
+        (df_blocked['Date'] == day_name)
+    ]
+    
+    blocked_times = day_blocks['Time'].values
+    is_fully_booked = "ALL" in blocked_times
 
-    # Draw the day
-    # We expand the first 3 days so they are visible, collapse the rest
+    # Visuals: Expand first 3 days
     with st.expander(display_date, expanded=(i < 3)):
-        if is_whole_day_blocked:
+        if is_fully_booked:
             st.warning("⛔ Fully Booked / Day Off")
         else:
-            # Create a grid of buttons (3 per row)
             cols = st.columns(3)
             for index, slot in enumerate(TIME_SLOTS):
-                # Check if this specific slot is blocked in the sheet
-                is_slot_blocked = slot in day_blocks['Time'].values
-                
-                col = cols[index % 3]
-                
-                if is_slot_blocked:
-                    # Show a grey button that does nothing
-                    col.button(f"❌ {slot}", key=f"btn_{date_str}_{slot}", disabled=True)
+                # If slot is in the list -> Grey Button
+                if slot in blocked_times:
+                    cols[index % 3].button(f"❌ {slot}", key=f"{date_str}_{slot}", disabled=True)
                 else:
-                    # Show a GREEN button that opens Telegram
+                    # Available -> Green Button
                     msg = f"Hi! Is the {slot} slot on {display_date} available?"
-                    # This creates a link to open Telegram with the message pre-filled
-                    link = f"https://t.me/{TELEGRAM_USERNAME}?start={msg}"
-                    # Note: Direct deep linking with text varies by device, 
-                    # simple link is safer:
                     link = f"https://t.me/{TELEGRAM_USERNAME}"
-                    
-                    col.link_button(f"✅ {slot}", link, type="primary")
+                    cols[index % 3].link_button(f"✅ {slot}", link, type="primary")
 
 st.divider()
-st.caption("Updates automatically from Tutor's Schedule")
+st.caption("Times are shown in your local time.")
