@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 # --- SETTINGS ---
 TELEGRAM_USERNAME = "apl450"  # <--- REMEMBER TO PUT YOUR USERNAME HERE!
 PAGE_TITLE = "Lesson Slots"
-PAGE_ICON = "🇬🇧"
+PAGE_ICON = ""
 
 # The Grid
 TIME_SLOTS = [
